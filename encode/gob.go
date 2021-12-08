@@ -14,18 +14,6 @@ type GobCodeProcess struct {
 	buffer  *bufio.Writer
 }
 
-var _ CodeProcess = (*GobCodeProcess)(nil)
-
-func NewGodCodeProcess(connect io.ReadWriteCloser) CodeProcess {
-	buffer := bufio.NewWriter(connect)
-	return &GobCodeProcess{
-		connect: connect,
-		encoder: gob.NewEncoder(buffer),
-		decoder: gob.NewDecoder(connect),
-		buffer:  buffer,
-	}
-}
-
 func (c *GobCodeProcess) ReadHeader(h *Header) error {
 	return c.decoder.Decode(h)
 }
@@ -38,7 +26,7 @@ func (c *GobCodeProcess) Close() error {
 	return c.connect.Close()
 }
 
-func (c *GobCodeProcess) Writer(header *Header, body interface{}) (err error) {
+func (c *GobCodeProcess) Write(header *Header, body interface{}) (err error) {
 	defer func() {
 		_ = c.buffer.Flush()
 		if err != nil {
@@ -54,4 +42,16 @@ func (c *GobCodeProcess) Writer(header *Header, body interface{}) (err error) {
 		return err
 	}
 	return nil
+}
+
+var _ CodeProcess = (*GobCodeProcess)(nil)
+
+func NewGobCodeProcess(connect io.ReadWriteCloser) CodeProcess {
+	buffer := bufio.NewWriter(connect)
+	return &GobCodeProcess{
+		connect: connect,
+		encoder: gob.NewEncoder(buffer),
+		decoder: gob.NewDecoder(connect),
+		buffer:  buffer,
+	}
 }
