@@ -2,11 +2,10 @@ package main
 
 import (
 	"MicroRPC"
-	"MicroRPC/encode"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net"
+	"sync"
 	"time"
 )
 
@@ -26,27 +25,48 @@ func main() {
 	addr := make(chan string)
 	go startServer(addr)
 
-	// mock easy client
-	conn, _ := net.Dial("tcp", <-addr)
-	defer func() { _ = conn.Close() }()
+	client, _ := MicroRPC.Dial("tcp", <-addr)
+	defer func() { _ = client.Close() }()
 
 	time.Sleep(time.Second)
 
-	// send options
-	// call Encode() == send
-	_ = json.NewEncoder(conn).Encode(MicroRPC.DefaultOption)
-	cp := encode.NewGobCodeProcess(conn)
 	// send request & receive response
+	// Synchronization
+	var wg sync.WaitGroup
 	for i := 0; i < 5; i++ {
-		h := &encode.Header{
-			ServiceMethod: "Foo.Sum",
-			Seq:           uint64(i),
-		}
-		// call Write == send
-		_ = cp.Write(h, fmt.Sprintf("micro rpc req %d", h.Seq))
-		_ = cp.ReadHeader(h)
-		var reply string
-		_ = cp.ReadBody(&reply)
-		log.Println("reply:", reply)
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			args := fmt.Sprintf("micro rpc req %d", i)
+			var reply string
+			if err := client.Call("Foo.Sum", args, &reply); err != nil {
+				log.Fatal("call Foo.Sum error:", err)
+			}
+			log.Println("reply:", reply)
+		}(i)
 	}
+	wg.Wait()
+	//// mock easy client
+	//conn, _ := net.Dial("tcp", <-addr)
+	//defer func() { _ = conn.Close() }()
+	//
+	//time.Sleep(time.Second)
+	//
+	//// send options
+	//// call Encode() == send
+	//_ = json.NewEncoder(conn).Encode(MicroRPC.DefaultOption)
+	//cp := encode.NewGobCodeProcess(conn)
+	//// send request & receive response
+	//for i := 0; i < 5; i++ {
+	//	h := &encode.Header{
+	//		ServiceMethod: "Foo.Sum",
+	//		Seq:           uint64(i),
+	//	}
+	//	// call Write == send
+	//	_ = cp.Write(h, fmt.Sprintf("micro rpc req %d", h.Seq))
+	//	_ = cp.ReadHeader(h)
+	//	var reply string
+	//	_ = cp.ReadBody(&reply)
+	//	log.Println("reply:", reply)
+	//}
 }
