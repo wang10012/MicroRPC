@@ -3,11 +3,12 @@ package MicroRPC
 import (
 	"MicroRPC/encode"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"io"
 	"log"
 	"net"
 	"reflect"
+	"strings"
 	"sync"
 )
 
@@ -23,7 +24,10 @@ var DefaultOption = &Option{
 	EncodingType: encode.GobType,
 }
 
-type Server struct{}
+type Server struct {
+	// locked
+	services sync.Map // key:service.name value:service
+}
 
 func NewServer() *Server {
 	return &Server{}
@@ -31,6 +35,41 @@ func NewServer() *Server {
 
 // DefaultServer start a default server to accept the lis
 var DefaultServer = NewServer()
+
+// Register publishes the receiver's methods in the DefaultServer.
+func Register(instance interface{}) error {
+	return DefaultServer.Register(instance)
+}
+
+// Register publishes in the server the set of methods of the
+func (server *Server) Register(instance interface{}) error {
+	s := newService(instance)
+	if _, duplicated := server.services.LoadOrStore(s.name, s); duplicated {
+		return errors.New("rpc: service already defined: " + s.name)
+	}
+	return nil
+}
+
+func (server *Server) findService(serviceMethod string) (s *service, m *method, err error) {
+	dot := strings.LastIndex(serviceMethod, ".")
+	if dot < 0 {
+		err = errors.New("rpc server: service/method request ill-formed: " + serviceMethod)
+		return
+	}
+	serviceName, methodName := serviceMethod[:dot], serviceMethod[dot+1:]
+	sec, ok := server.services.Load(serviceName)
+	if !ok {
+		err = errors.New("rpc server: can't find service " + serviceName)
+		return
+	}
+	// assert
+	s = sec.(*service)
+	m = s.methods[methodName]
+	if m == nil {
+		err = errors.New("rpc server: can't find method " + methodName)
+	}
+	return
+}
 
 func Accept(lis net.Listener) {
 	DefaultServer.Accept(lis)
@@ -73,6 +112,8 @@ func (server *Server) ConnectServer(conn io.ReadWriteCloser) {
 type request struct {
 	header *encode.Header
 	// err = client.Call("Arith.Multiply", args, &reply)
+	_service     *service
+	_method      *method
 	argv, replyv reflect.Value
 }
 
@@ -115,11 +156,26 @@ func (server *Server) readRequest(cp encode.CodeProcess) (*request, error) {
 		return nil, err
 	}
 	req := &request{header: header}
-	// TODO: now we just suppose it's string
-	req.argv = reflect.New(reflect.TypeOf(""))
-	if err = cp.ReadBody(req.argv.Interface()); err != nil {
-		log.Println("rpc server: read argv err:", err)
+
+	req._service, req._method, err = server.findService(header.ServiceMethod)
+
+	if err != nil {
+		return req, nil
 	}
+
+	req.argv = req._method.newArgv()
+	req.replyv = req._method.newReplyv()
+
+	// ReadBody need pointer as parameter
+	args := req.argv.Interface()
+	if req.argv.Type().Kind() != reflect.Ptr {
+		args = req.argv.Addr().Interface()
+	}
+	if err = cp.ReadBody(args); err != nil {
+		log.Println("rpc server: read body err:", err)
+		return req, err
+	}
+
 	return req, nil
 }
 
@@ -143,11 +199,15 @@ func (server *Server) sendResponse(cp encode.CodeProcess, header *encode.Header,
 }
 
 func (server *Server) handleRequest(cp encode.CodeProcess, req *request, sending *sync.Mutex, wg *sync.WaitGroup) {
-	// TODO call registered rpc methods to get the right replyv
-	// just print argv and send a hello reply
+	// call method
 	defer wg.Done()
-	log.Println(req.header, req.argv.Elem())
-	req.replyv = reflect.ValueOf(fmt.Sprintf("micro rpc resp %d", req.header.Seq))
+	err := req._service.call(req._method, req.argv, req.replyv)
+	if err != nil {
+		req.header.Error = err.Error()
+		// send error response
+		server.sendResponse(cp, req.header, invalidRequest, sending)
+		return
+	}
 	// send value response
 	server.sendResponse(cp, req.header, req.replyv.Interface(), sending)
 }

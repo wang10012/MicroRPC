@@ -18,6 +18,8 @@ func (c *GobCodeProcess) ReadHeader(h *Header) error {
 	return c.decoder.Decode(h)
 }
 
+// ReadBody :If body represents a value as opposed to a pointer, the answer won't
+// get back to the caller. Make sure it's a pointer.
 func (c *GobCodeProcess) ReadBody(body interface{}) error {
 	return c.decoder.Decode(body)
 }
