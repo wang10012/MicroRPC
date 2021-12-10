@@ -2,6 +2,7 @@ package main
 
 import (
 	"MicroRPC"
+	"context"
 	"log"
 	"net"
 	"sync"
@@ -52,7 +53,9 @@ func main() {
 			defer wg.Done()
 			args := &Args{Num1: i, Num2: i * i}
 			var reply int
-			if err := client.Call("Wsj.Sum", args, &reply); err != nil {
+			// add call timeout control
+			ctx, _ := context.WithTimeout(context.Background(), time.Second)
+			if err := client.Call(ctx, "Wsj.Sum", args, &reply); err != nil {
 				log.Fatal("call Wsj.Sum error:", err)
 			}
 			log.Printf("%d + %d = %d", args.Num1, args.Num2, reply)

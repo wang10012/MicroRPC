@@ -4,24 +4,29 @@ import (
 	"MicroRPC/encode"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
 	"reflect"
 	"strings"
 	"sync"
+	"time"
 )
 
 const rpcNumber = 0x3bef5c
 
 type Option struct {
-	RPCNumber    int
-	EncodingType encode.Type
+	RPCNumber      int
+	EncodingType   encode.Type
+	ConnectTimeout time.Duration
+	HandleTimeout  time.Duration
 }
 
 var DefaultOption = &Option{
-	RPCNumber:    rpcNumber,
-	EncodingType: encode.GobType,
+	RPCNumber:      rpcNumber,
+	EncodingType:   encode.GobType,
+	ConnectTimeout: time.Second * 10,
 }
 
 type Server struct {
@@ -105,7 +110,7 @@ func (server *Server) ConnectServer(conn io.ReadWriteCloser) {
 		log.Printf("rpc server: invalid encoding type %s", option.EncodingType)
 		return
 	}
-	server.serverProcess(f(conn))
+	server.serverProcess(f(conn), &option)
 }
 
 // request stores all information of a call
@@ -124,7 +129,7 @@ type request struct {
 // (2) return message after normal processing
 var invalidRequest = struct{}{}
 
-func (server *Server) serverProcess(cp encode.CodeProcess) {
+func (server *Server) serverProcess(cp encode.CodeProcess, opt *Option) {
 	mu := new(sync.Mutex)     // send a complete response
 	wg := new(sync.WaitGroup) // make sure all handleRequest done
 	for {
@@ -144,7 +149,7 @@ func (server *Server) serverProcess(cp encode.CodeProcess) {
 		wg.Add(1)
 		// handleRequest
 		// cover sendResponse
-		go server.handleRequest(cp, req, mu, wg)
+		go server.handleRequest(cp, req, mu, wg, opt.HandleTimeout)
 	}
 	wg.Wait()
 	_ = cp.Close()
@@ -198,16 +203,37 @@ func (server *Server) sendResponse(cp encode.CodeProcess, header *encode.Header,
 	}
 }
 
-func (server *Server) handleRequest(cp encode.CodeProcess, req *request, sending *sync.Mutex, wg *sync.WaitGroup) {
+func (server *Server) handleRequest(cp encode.CodeProcess, req *request, sending *sync.Mutex, wg *sync.WaitGroup, timeout time.Duration) {
 	// call method
 	defer wg.Done()
-	err := req._service.call(req._method, req.argv, req.replyv)
-	if err != nil {
-		req.header.Error = err.Error()
-		// send error response
-		server.sendResponse(cp, req.header, invalidRequest, sending)
+
+	called := make(chan struct{})
+
+	go func() {
+		err := req._service.call(req._method, req.argv, req.replyv)
+		called <- struct{}{}
+		if err != nil {
+			req.header.Error = err.Error()
+			// send error response
+			server.sendResponse(cp, req.header, invalidRequest, sending)
+			return
+		}
+		// send value response
+		server.sendResponse(cp, req.header, req.replyv.Interface(), sending)
+	}()
+
+	if timeout == 0 {
+		<-called
+		// log.Println("call success")
 		return
 	}
-	// send value response
-	server.sendResponse(cp, req.header, req.replyv.Interface(), sending)
+
+	select {
+	case <-time.After(timeout):
+		req.header.Error = fmt.Sprintf("rpc server: request handle timeout: expect within %s", timeout)
+		server.sendResponse(cp, req.header, invalidRequest, sending)
+	case <-called:
+		log.Println("call success!")
+	}
+	// Todo: 1. why sent is needed? 2. goroutine leak?
 }
