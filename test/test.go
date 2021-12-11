@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"reflect"
 	"strings"
@@ -38,17 +37,5 @@ type User struct {
 }
 
 func main() {
-	_map := new(map[string]int)
-	m := reflect.TypeOf(_map)
-	replyv := reflect.New(m.Elem())
-	fmt.Println("now:", replyv)
-	switch m.Elem().Kind() {
-	case reflect.Map:
-		fmt.Println("before,it is a map:", replyv)
-		replyv.Elem().Set(reflect.MakeMap(m.Elem()))
-		fmt.Println("after,it is a map:", replyv)
-	case reflect.Slice:
-		//replyv.Elem().Set(reflect.MakeSlice(m.Elem(), 0, 0))
-		fmt.Println("it is a slice:", replyv)
-	}
+
 }

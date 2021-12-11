@@ -5,6 +5,7 @@ import (
 	"context"
 	"log"
 	"net"
+	"net/http"
 	"sync"
 	"time"
 )
@@ -30,8 +31,12 @@ func startServer(addr chan string) {
 		log.Fatal("network error:", err)
 	}
 	log.Println("start rpc server on", l.Addr())
+	MicroRPC.HandleHTTP()
 	addr <- l.Addr().String()
-	MicroRPC.Accept(l)
+	// add http
+	_ = http.Serve(l, nil)
+	// without http
+	//MicroRPC.Accept(l)
 }
 
 func main() {
@@ -40,7 +45,7 @@ func main() {
 	addr := make(chan string)
 	go startServer(addr)
 
-	client, _ := MicroRPC.Dial("tcp", <-addr)
+	client, _ := MicroRPC.DialHTTP("tcp", <-addr)
 	defer func() { _ = client.Close() }()
 
 	time.Sleep(time.Second)

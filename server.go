@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/http"
 	"reflect"
 	"strings"
 	"sync"
@@ -236,4 +237,40 @@ func (server *Server) handleRequest(cp encode.CodeProcess, req *request, sending
 		log.Println("call success!")
 	}
 	// Todo: 1. why sent is needed? 2. goroutine leak?
+}
+
+// add http
+const (
+	defaultRPCPath   = "/micro-rpc"
+	defaultDebugPath = "/debug/rpc"
+)
+
+// ServeHTTP server implements an http.Handler that answers RPC requests.
+// Hijack() : take over the connection.Use http for creating connection,and then use rpc
+func (server *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	if req.Method != "CONNECT" {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		_, _ = io.WriteString(w, "405 must CONNECT\n")
+		return
+	}
+	// take over the conn
+	conn, _, err := w.(http.Hijacker).Hijack()
+	if err != nil {
+		log.Print("rpc hijacker ", req.RemoteAddr, ": ", err.Error())
+		return
+	}
+	_, _ = io.WriteString(conn, "HTTP/1.0 "+"200 connected to micro rpc"+"\n\n")
+	log.Printf("HTTP/1.0 " + "200 connected to micro rpc" + "\n\n")
+	server.ConnectServer(conn)
+}
+
+// HandleHTTP registers an HTTP handler for RPC messages on rpcPath.
+func (server *Server) HandleHTTP() {
+	http.Handle(defaultRPCPath, server)
+}
+
+// HandleHTTP default server register HTTP handlers
+func HandleHTTP() {
+	DefaultServer.HandleHTTP()
 }

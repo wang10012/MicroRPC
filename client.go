@@ -2,6 +2,7 @@ package MicroRPC
 
 import (
 	"MicroRPC/encode"
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/http"
 	"sync"
 	"time"
 )
@@ -182,6 +184,22 @@ func (client *Client) Call(ctx context.Context, serviceMethod string, args, repl
 	}
 }
 
+// NewHTTPClient new a Client instance via HTTP as transport protocol
+func NewHTTPClient(conn net.Conn, opt *Option) (*Client, error) {
+	_, _ = io.WriteString(conn, fmt.Sprintf("CONNECT %s HTTP/1.0\n\n", defaultRPCPath))
+	log.Printf("CONNECT %s HTTP/1.0\n\n", defaultRPCPath)
+
+	// Require successful HTTP response before switching to RPC protocol.
+	resp, err := http.ReadResponse(bufio.NewReader(conn), &http.Request{Method: "CONNECT"})
+	if err == nil && resp.Status == "200 connected to micro rpc" {
+		return NewClient(conn, opt)
+	}
+	if err == nil {
+		err = errors.New("unexpected HTTP response: " + resp.Status)
+	}
+	return nil, err
+}
+
 func NewClient(connect net.Conn, option *Option) (*Client, error) {
 	f := encode.NewCodeProcessMap[option.EncodingType]
 	if f == nil {
@@ -248,7 +266,10 @@ type clientStatus struct {
 	err    error
 }
 
-func dialTimeout(network, address string, opts ...*Option) (client *Client, err error) {
+//newClientFunc implement different dial by different ClientFunc
+type newClientFunc func(conn net.Conn, opt *Option) (client *Client, err error)
+
+func dialTimeout(f newClientFunc, network, address string, opts ...*Option) (client *Client, err error) {
 	opt, err := parseOptions(opts...)
 	if err != nil {
 		return nil, err
@@ -266,7 +287,7 @@ func dialTimeout(network, address string, opts ...*Option) (client *Client, err 
 	}()
 	ch := make(chan clientStatus)
 	go func() {
-		client, err := NewClient(conn, opt)
+		client, err := f(conn, opt)
 		ch <- clientStatus{client: client, err: err}
 	}()
 	// edge case of the value of ConnectTimeout
@@ -284,6 +305,12 @@ func dialTimeout(network, address string, opts ...*Option) (client *Client, err 
 	}
 }
 
+// DialHTTP connects to an HTTP RPC server at the specified network address
+// listening on the default HTTP RPC path.
+func DialHTTP(network, address string, opts ...*Option) (*Client, error) {
+	return dialTimeout(NewHTTPClient, network, address, opts...)
+}
+
 func Dial(network, address string, options ...*Option) (client *Client, err error) {
-	return dialTimeout(network, address, options...)
+	return dialTimeout(NewClient, network, address, options...)
 }
