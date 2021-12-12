@@ -11,6 +11,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -313,4 +314,21 @@ func DialHTTP(network, address string, opts ...*Option) (*Client, error) {
 
 func Dial(network, address string, options ...*Option) (client *Client, err error) {
 	return dialTimeout(NewClient, network, address, options...)
+}
+
+// GeneralDial :protocolAddr is a general format (protocol@addr) to represent a rpc server
+// eg, http@10.0.0.1:7001, tcp@10.0.0.1:9999
+func GeneralDial(protocolAddr string, opts ...*Option) (*Client, error) {
+	parts := strings.Split(protocolAddr, "@")
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("rpc client err: wrong format '%s', expect protocol@addr", protocolAddr)
+	}
+	protocol, addr := parts[0], parts[1]
+	switch protocol {
+	case "http":
+		return DialHTTP("tcp", addr, opts...)
+	default:
+		// tcp, unix or other transport protocol
+		return Dial(protocol, addr, opts...)
+	}
 }

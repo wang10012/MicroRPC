@@ -98,6 +98,7 @@ func (server *Server) ConnectServer(conn io.ReadWriteCloser) {
 		_ = conn.Close()
 	}()
 	var option Option
+	// Decode(must be a pointer)
 	if err := json.NewDecoder(conn).Decode(&option); err != nil {
 		log.Println("rpc server: options error: ", err)
 		return
