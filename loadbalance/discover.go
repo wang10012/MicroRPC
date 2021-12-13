@@ -75,6 +75,7 @@ func (d *Discovery) Get(mode ModeSelect) (string, error) {
 
 // GetAll returns all services in discovery
 func (d *Discovery) GetAll() ([]string, error) {
+	// Todo: RwLock ?
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	// return a copy of d.services
